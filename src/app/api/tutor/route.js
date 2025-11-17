@@ -9,13 +9,10 @@ export async function GET(request) {
   return NextResponse.json({ message: 'The tutor bot is ALIVE and ready for AI!' });
 }
 
-
+// --- Our authenticated fetch function ---
 async function imageToBuffer(url, mimeType) {
-  // Get our Twilio credentials from Vercel
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-  // Create the 'Basic' auth header
   const authHeader = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
 
   // Make an AUTHENTICATED request to the Twilio API
@@ -23,13 +20,19 @@ async function imageToBuffer(url, mimeType) {
     headers: { 'Authorization': authHeader }
   });
 
-  // Now we'll get the real image, not an error
+  
+  if (!response.ok) {
+    const errorBody = await response.text(); // Get the error message from Twilio
+    console.error(`Twilio fetch failed: ${response.status} ${response.statusText}`, errorBody);
+    throw new Error(`Failed to fetch image from Twilio: ${response.status}`);
+  }
+
+  // Now we'll get the real image
   const arrayBuffer = await response.arrayBuffer();
   
   return {
     inlineData: {
       data: Buffer.from(arrayBuffer).toString('base64'),
-      // Use the REAL mimeType that Twilio gives us
       mimeType: mimeType || 'image/jpeg', 
     },
   };
@@ -40,20 +43,16 @@ export async function POST(request) {
   try {
     const formData = await request.formData();
     const mediaUrl = formData.get('MediaUrl0'); // The URL of the image
-    // --- NEW: Get the real MIME type ---
-    const mediaType = formData.get('MediaContentType0'); 
+    const mediaType = formData.get('MediaContentType0'); // The real MIME type
     
-    // --- Create the AI client ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' }); 
 
     let replyText = "Please send me a photo of your math homework so I can help!";
 
-    // --- If there is an image, run the AI ---
     if (mediaUrl) {
       console.log(`Analyzing image from: ${mediaUrl} (Type: ${mediaType})`);
       try {
-        // --- NEW: Pass the real MIME type to our helper ---
         const imagePart = await imageToBuffer(mediaUrl, mediaType); 
         
         const result = await model.generateContent([TUTOR_PROMPT, imagePart]);
