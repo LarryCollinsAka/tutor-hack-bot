@@ -5,10 +5,10 @@ import { createClient } from '@vercel/kv';
 
 import { TUTOR_SYSTEM_PROMPT } from '@/app/lib/tutor-system';
 
-// Create the KV client (uses UPSTASH_ env vars)
+// Create the KV client (uses REDIS_ env vars)
 const kv = createClient({
-  url: process.env.KV_REDIS_REST_URL,
-  token: process.env.KV_REDIS_REST_TOKEN,
+  url: process.env.KV_REST_API_URL,
+  token: process.env.KV_REST_API_TOKEN,
 });
 
 // --- Our authenticated image fetch function (no changes) ---
@@ -31,7 +31,7 @@ async function imageToBuffer(url, mimeType) {
   };
 }
 
-// --- Our main function (no changes) ---
+// --- Our new main function ---
 export async function POST(request) {
   try {
     const formData = await request.formData();
@@ -44,12 +44,10 @@ export async function POST(request) {
     let conversationHistory = await kv.get(historyKey) || [];
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    
-    // --- THIS IS THE FIX ---
-    // Switching back to the 'flash' model (fast and should be available now)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
-    // --- END OF FIX ---
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
+    // --- THIS IS THE FIX ---
+    // We must pass the system prompt as a "Content" object, not a string.
     const chat = model.startChat({
       history: conversationHistory,
       systemInstruction: {
@@ -57,6 +55,7 @@ export async function POST(request) {
         parts: [{ text: TUTOR_SYSTEM_PROMPT }]
       },
     });
+    // --- END OF FIX ---
 
     let userMessage;
     if (mediaUrl) {
