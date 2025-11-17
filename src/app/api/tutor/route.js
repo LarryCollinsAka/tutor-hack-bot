@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import { twiml } from 'twilio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { kv } from '@vercel/kv';
+import { createClient } from '@vercel/kv';
 
 import { TUTOR_SYSTEM_PROMPT } from '@/app/lib/tutor-system';
+
+// Create the KV client (uses REDIS_ env vars)
+const kv = createClient({
+  url: process.env.REDIS_REST_API_URL,
+  token: process.env.REDIS_REST_API_TOKEN,
+});
 
 // --- Our authenticated image fetch function (no changes) ---
 async function imageToBuffer(url, mimeType) {
@@ -32,61 +38,52 @@ export async function POST(request) {
     const mediaUrl = formData.get('MediaUrl0');
     const mediaType = formData.get('MediaContentType0');
     const userText = formData.get('Body') || '';
-    const userPhone = formData.get('From'); 
+    const userPhone = formData.get('From'); // e.g., 'whatsapp:+1234567890'
 
-    // --- 1. LOAD MEMORY ---
-    // We'll use the user's phone number as the key for their conversation
     const historyKey = `chat_${userPhone}`;
     let conversationHistory = await kv.get(historyKey) || [];
 
-    // --- 2. PREPARE AI ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // Use gemini-2.5-flash as it's the one that works and is fast
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
 
-    // Start a chat session with the full system prompt and past history
+    // --- THIS IS THE FIX ---
+    // We must pass the system prompt as a "Content" object, not a string.
     const chat = model.startChat({
       history: conversationHistory,
-      systemInstruction: TUTOR_SYSTEM_PROMPT,
+      systemInstruction: {
+        role: "system",
+        parts: [{ text: TUTOR_SYSTEM_PROMPT }]
+      },
     });
+    // --- END OF FIX ---
 
-    // --- 3. PREPARE USER'S MESSAGE ---
     let userMessage;
     if (mediaUrl) {
-      // User sent an image. We'll send the image and any text they sent with it.
       console.log(`Analyzing image from: ${mediaUrl}`);
       const imagePart = await imageToBuffer(mediaUrl, mediaType);
-      // Combine text (if any) and the image
       userMessage = [userText, imagePart]; 
     } else {
-      // User sent text only
       console.log(`Analyzing text question: ${userText}`);
       userMessage = userText;
     }
 
-    // --- 4. GET AI REPLY ---
     let replyText = "Sorry, I had a little trouble with that. Can you try again?";
     try {
       const result = await chat.sendMessage(userMessage);
       const response = await result.response;
       replyText = response.text();
 
-      // --- 5. SAVE MEMORY ---
-      // Update our history with the user's message and the bot's reply
       const userMessageForHistory = { role: "user", parts: [{ text: userText }] };
-      // If an image was sent, we'll just note it in the history
       if(mediaUrl) userMessageForHistory.parts.push({ text: "[User sent an image]" });
       
       const botReplyForHistory = { role: "model", parts: [{ text: replyText }] };
 
-      // Add both to our history and save it back to Vercel KV
       const updatedHistory = [
         ...conversationHistory,
         userMessageForHistory,
         botReplyForHistory
       ];
       
-      // Save for 1 day (86400 seconds). You can make this longer!
       await kv.set(historyKey, updatedHistory, { ex: 86400 });
 
     } catch (aiError) {
@@ -95,7 +92,6 @@ export async function POST(request) {
       replyText = "Sorry, I had a little trouble analyzing that image. Can you try sending it again?";
     }
     
-    // --- 6. SEND REPLY TO USER ---
     const messagingResponse = new twiml.MessagingResponse();
     messagingResponse.message(replyText);
     const twimlResponse = messagingResponse.toString();
