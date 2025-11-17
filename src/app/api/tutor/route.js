@@ -7,8 +7,8 @@ import { TUTOR_SYSTEM_PROMPT } from '@/app/lib/tutor-system';
 
 // Create the KV client (uses REDIS_ env vars)
 const kv = createClient({
-  url: process.env.REDIS_REST_API_URL,
-  token: process.env.REDIS_REST_API_TOKEN,
+  url: process.env.KV_REST_API_URL,
+  token: process.env.KV_REST_API_TOKEN,
 });
 
 // --- Our authenticated image fetch function (no changes) ---
