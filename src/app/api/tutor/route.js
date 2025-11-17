@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server';
 import { twiml } from 'twilio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { kv } from '@vercel/kv';
 
-import { IMAGE_TUTOR_PROMPT, TEXT_TUTOR_PROMPT } from '@/app/lib/prompt';
+import { TUTOR_SYSTEM_PROMPT } from '@/app/lib/tutor-system';
 
-// --- A "health check" for us to test in the browser ---
-export async function GET(request) {
-  return NextResponse.json({ message: 'The tutor bot is ALIVE and ready for AI!' });
-}
-
-// --- Our authenticated fetch function (no changes) ---
+// --- Our authenticated image fetch function (no changes) ---
 async function imageToBuffer(url, mimeType) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -29,52 +25,77 @@ async function imageToBuffer(url, mimeType) {
   };
 }
 
-// --- Our main function that handles incoming messages ---
+// --- Our new main function ---
 export async function POST(request) {
   try {
     const formData = await request.formData();
     const mediaUrl = formData.get('MediaUrl0');
     const mediaType = formData.get('MediaContentType0');
-    const userText = formData.get('Body') || ''; // The user's text message
-    
+    const userText = formData.get('Body') || '';
+    const userPhone = formData.get('From'); // e.g., 'whatsapp:+1234567890'
+
+    // --- 1. LOAD MEMORY ---
+    // We'll use the user's phone number as the key for their conversation
+    const historyKey = `chat_${userPhone}`;
+    let conversationHistory = await kv.get(historyKey) || [];
+
+    // --- 2. PREPARE AI ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    // Use gemini-2.5-flash as it's the one that works and is fast
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
 
-    let replyText = "I'm not sure how to help with that. Please send a photo of a math problem or ask me a math/science question.";
-    let generationRequest;
+    // Start a chat session with the full system prompt and past history
+    const chat = model.startChat({
+      history: conversationHistory,
+      systemInstruction: TUTOR_SYSTEM_PROMPT,
+    });
 
-    // --- THIS IS THE NEW LOGIC ---
+    // --- 3. PREPARE USER'S MESSAGE ---
+    let userMessage;
     if (mediaUrl) {
-      // --- 1. HANDLE IMAGE REQUEST ---
-      console.log(`Analyzing image from: ${mediaUrl} (Type: ${mediaType})`);
+      // User sent an image. We'll send the image and any text they sent with it.
+      console.log(`Analyzing image from: ${mediaUrl}`);
       const imagePart = await imageToBuffer(mediaUrl, mediaType);
-      generationRequest = model.generateContent([IMAGE_TUTOR_PROMPT, imagePart]);
-
-    } else if (userText.trim().length > 0) {
-      // --- 2. HANDLE TEXT REQUEST ---
-      console.log(`Analyzing text question: ${userText}`);
-      // We combine the system prompt with the user's question
-      generationRequest = model.generateContent([TEXT_TUTOR_PROMPT, userText]);
-      
+      // Combine text (if any) and the image
+      userMessage = [userText, imagePart]; 
     } else {
-      // --- 3. HANDLE EMPTY MESSAGE ---
-      replyText = "Please send me a photo of your homework or a math/science question!";
+      // User sent text only
+      console.log(`Analyzing text question: ${userText}`);
+      userMessage = userText;
+    }
+
+    // --- 4. GET AI REPLY ---
+    let replyText = "Sorry, I had a little trouble with that. Can you try again?";
+    try {
+      const result = await chat.sendMessage(userMessage);
+      const response = await result.response;
+      replyText = response.text();
+
+      // --- 5. SAVE MEMORY ---
+      // Update our history with the user's message and the bot's reply
+      const userMessageForHistory = { role: "user", parts: [{ text: userText }] };
+      // If an image was sent, we'll just note it in the history
+      if(mediaUrl) userMessageForHistory.parts.push({ text: "[User sent an image]" });
+      
+      const botReplyForHistory = { role: "model", parts: [{ text: replyText }] };
+
+      // Add both to our history and save it back to Vercel KV
+      const updatedHistory = [
+        ...conversationHistory,
+        userMessageForHistory,
+        botReplyForHistory
+      ];
+      
+      // Save for 1 day (86400 seconds). You can make this longer!
+      await kv.set(historyKey, updatedHistory, { ex: 86400 });
+
+    } catch (aiError) {
+      console.error("Gemini AI Error:", aiError);
+      console.error(aiError); 
+      replyText = "Sorry, I had a little trouble analyzing that image. Can you try sending it again?";
     }
     
-    // --- Run the selected AI request ---
-    if (generationRequest) {
-      try {
-        const result = await generationRequest;
-        const response = await result.response;
-        replyText = response.text();
-      } catch (aiError) {
-        console.error("Gemini AI Error:", aiError);
-        console.error(aiError); 
-        replyText = "Sorry, I had a little trouble with that request. Can you try sending it again?";
-      }
-    }
-    
-    // --- Create and send the TwiML response ---
+    // --- 6. SEND REPLY TO USER ---
     const messagingResponse = new twiml.MessagingResponse();
     messagingResponse.message(replyText);
     const twimlResponse = messagingResponse.toString();
