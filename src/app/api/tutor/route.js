@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { twiml } from 'twilio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+import { TUTOR_PROMPT } from '@/app/lib/prompt';
+
 // --- A "health check" for us to test in the browser ---
 export async function GET(request) {
   return NextResponse.json({ message: 'The tutor bot is ALIVE and ready for AI!' });
@@ -27,20 +29,10 @@ export async function POST(request) {
     const from = formData.get('From'); // The user's WhatsApp number
 
     // --- Create the AI client ---
-    // This securely reads the API key you just added to Vercel
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel('gemini-pro-vision'); // The model that can see images
-
-    // This is our instruction for the AI
-    const prompt = `
-      You are a friendly and encouraging AI math tutor for a high school student.
-      A student has sent you a photo of their handwritten math homework.
-      1.  **Analyze the image** to understand the math problem.
-      2.  **Identify the mistake** in their work. If there is no mistake, praise them.
-      3.  **Do not give the final answer.** Instead, provide a simple, step-by-step hint
-          to help the student find the mistake and correct it themselves.
-      4.  Keep your response concise, friendly, and in a single paragraph.
-    `;
+    
+    // --- Use the new, faster model from your suggestion ---
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }); 
 
     let replyText = "Please send me a photo of your math homework so I can help!";
 
@@ -48,14 +40,11 @@ export async function POST(request) {
     if (mediaUrl) {
       console.log(`Analyzing image from: ${mediaUrl}`);
       try {
-        // 1. Fetch the image from Twilio's URL
         const imagePart = await imageToBuffer(mediaUrl);
-
-        // 2. Send the image and prompt to Gemini
-        const result = await model.generateContent([prompt, imagePart]);
-        const response = await result.response;
         
-        // 3. Get the AI's text response
+        // --- Use your new, much better prompt! ---
+        const result = await model.generateContent([TUTOR_PROMPT, imagePart]);
+        const response = await result.response;
         replyText = response.text();
 
       } catch (aiError) {
@@ -75,6 +64,7 @@ export async function POST(request) {
 
   } catch (error) {
     console.error("Main POST Error:", error);
+    console.error(error); 
     return new NextResponse('Error processing message', { status: 500 });
   }
 }
