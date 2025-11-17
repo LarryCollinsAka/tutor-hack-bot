@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { twiml } from 'twilio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-import { TUTOR_PROMPT } from '@/app/lib/prompt';
+// --- Import our new prompt ---
+import { TUTOR_PROMPT } from '../../../lib/prompt.js';
 
 // --- A "health check" for us to test in the browser ---
 export async function GET(request) {
@@ -31,7 +32,7 @@ export async function POST(request) {
     // --- Create the AI client ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     
-    // --- Use the new, faster model from your suggestion ---
+
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
 
     let replyText = "Please send me a photo of your math homework so I can help!";
