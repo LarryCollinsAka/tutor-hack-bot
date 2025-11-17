@@ -1,41 +1,80 @@
 import { NextResponse } from 'next/server';
 import { twiml } from 'twilio';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// handles incoming messages
-export async function POST(request) {
-  // Get the data from Twilio's request
-  const formData = await request.formData();
-  const body = formData.get('Body') || 'No text'; // The text the user sent
-  const mediaUrl = formData.get('MediaUrl0'); // The URL of the image, if any
-  const from = formData.get('From'); // The user's WhatsApp number
+// --- A "health check" for us to test in the browser ---
+export async function GET(request) {
+  return NextResponse.json({ message: 'The tutor bot is ALIVE and ready for AI!' });
+}
 
-  // Log what we received so we can see it in the Vercel logs
-  console.log(`Received message from ${from}:`);
-  console.log(`Text Body: ${body}`);
-  console.log(`Media URL: ${mediaUrl}`);
-
-  // --- This is where our AI logic will go soon ---
-  // For now, just send a simple test reply
-  
-  let replyText = "Hello! I received your message. I am not smart yet.";
-  
-  if (mediaUrl) {
-    replyText = "Great! I received your image. I will analyze it soon.";
-  } else {
-    replyText = "Please send me an image of your math homework.";
-  }
-  
-  // --- Create the Twilio TwiML response ---
-  const messagingResponse = new twiml.MessagingResponse();
-  messagingResponse.message(replyText);
-  
-  // Convert the TwiML to an XML string
-  const twimlResponse = messagingResponse.toString();
-
-  // Send the TwiML response back to Twilio
-  return new NextResponse(twimlResponse, {
-    headers: {
-      'Content-Type': 'text/xml',
+// --- Helper function to fetch the image from Twilio's URL and turn it into a buffer ---
+async function imageToBuffer(url) {
+  const response = await fetch(url);
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    inlineData: {
+      data: Buffer.from(arrayBuffer).toString('base64'),
+      mimeType: response.headers.get('content-type') || 'image/jpeg',
     },
-  });
+  };
+}
+
+// --- Our main function that handles incoming messages ---
+export async function POST(request) {
+  try {
+    const formData = await request.formData();
+    const mediaUrl = formData.get('MediaUrl0'); // The URL of the image
+    const from = formData.get('From'); // The user's WhatsApp number
+
+    // --- Create the AI client ---
+    // This securely reads the API key you just added to Vercel
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel('gemini-pro-vision'); // The model that can see images
+
+    // This is our instruction for the AI
+    const prompt = `
+      You are a friendly and encouraging AI math tutor for a high school student.
+      A student has sent you a photo of their handwritten math homework.
+      1.  **Analyze the image** to understand the math problem.
+      2.  **Identify the mistake** in their work. If there is no mistake, praise them.
+      3.  **Do not give the final answer.** Instead, provide a simple, step-by-step hint
+          to help the student find the mistake and correct it themselves.
+      4.  Keep your response concise, friendly, and in a single paragraph.
+    `;
+
+    let replyText = "Please send me a photo of your math homework so I can help!";
+
+    // --- If there is an image, run the AI ---
+    if (mediaUrl) {
+      console.log(`Analyzing image from: ${mediaUrl}`);
+      try {
+        // 1. Fetch the image from Twilio's URL
+        const imagePart = await imageToBuffer(mediaUrl);
+
+        // 2. Send the image and prompt to Gemini
+        const result = await model.generateContent([prompt, imagePart]);
+        const response = await result.response;
+        
+        // 3. Get the AI's text response
+        replyText = response.text();
+
+      } catch (aiError) {
+        console.error("Gemini AI Error:", aiError);
+        replyText = "Sorry, I had a little trouble analyzing that image. Can you try sending it again?";
+      }
+    }
+    
+    // --- Create and send the TwiML response ---
+    const messagingResponse = new twiml.MessagingResponse();
+    messagingResponse.message(replyText);
+    const twimlResponse = messagingResponse.toString();
+
+    return new NextResponse(twimlResponse, {
+      headers: { 'Content-Type': 'text/xml' },
+    });
+
+  } catch (error) {
+    console.error("Main POST Error:", error);
+    return new NextResponse('Error processing message', { status: 500 });
+  }
 }
