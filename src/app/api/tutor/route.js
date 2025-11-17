@@ -16,7 +16,8 @@ async function imageToBuffer(url) {
   return {
     inlineData: {
       data: Buffer.from(arrayBuffer).toString('base64'),
-      mimeType: response.headers.get('content-type') || 'image/jpeg',
+      
+      mimeType: 'image/jpeg', 
     },
   };
 }
@@ -31,7 +32,7 @@ export async function POST(request) {
     // --- Create the AI client ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     
-
+    // --- Use the gemini-2.5-flash model ---
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
 
     let replyText = "Please send me a photo of your math homework so I can help!";
