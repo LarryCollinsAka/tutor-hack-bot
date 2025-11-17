@@ -32,7 +32,7 @@ export async function POST(request) {
     const mediaUrl = formData.get('MediaUrl0');
     const mediaType = formData.get('MediaContentType0');
     const userText = formData.get('Body') || '';
-    const userPhone = formData.get('From'); // e.g., 'whatsapp:+1234567890'
+    const userPhone = formData.get('From'); 
 
     // --- 1. LOAD MEMORY ---
     // We'll use the user's phone number as the key for their conversation
