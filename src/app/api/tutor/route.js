@@ -9,15 +9,28 @@ export async function GET(request) {
   return NextResponse.json({ message: 'The tutor bot is ALIVE and ready for AI!' });
 }
 
-// --- Helper function to fetch the image from Twilio's URL and turn it into a buffer ---
-async function imageToBuffer(url) {
-  const response = await fetch(url);
+
+async function imageToBuffer(url, mimeType) {
+  // Get our Twilio credentials from Vercel
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+  // Create the 'Basic' auth header
+  const authHeader = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+
+  // Make an AUTHENTICATED request to the Twilio API
+  const response = await fetch(url, {
+    headers: { 'Authorization': authHeader }
+  });
+
+  // Now we'll get the real image, not an error
   const arrayBuffer = await response.arrayBuffer();
+  
   return {
     inlineData: {
       data: Buffer.from(arrayBuffer).toString('base64'),
-      
-      mimeType: 'image/jpeg', 
+      // Use the REAL mimeType that Twilio gives us
+      mimeType: mimeType || 'image/jpeg', 
     },
   };
 }
@@ -27,29 +40,29 @@ export async function POST(request) {
   try {
     const formData = await request.formData();
     const mediaUrl = formData.get('MediaUrl0'); // The URL of the image
-    const from = formData.get('From'); // The user's WhatsApp number
-
+    // --- NEW: Get the real MIME type ---
+    const mediaType = formData.get('MediaContentType0'); 
+    
     // --- Create the AI client ---
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    
-    // --- Use the gemini-2.5-flash model ---
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
 
     let replyText = "Please send me a photo of your math homework so I can help!";
 
     // --- If there is an image, run the AI ---
     if (mediaUrl) {
-      console.log(`Analyzing image from: ${mediaUrl}`);
+      console.log(`Analyzing image from: ${mediaUrl} (Type: ${mediaType})`);
       try {
-        const imagePart = await imageToBuffer(mediaUrl);
+        // --- NEW: Pass the real MIME type to our helper ---
+        const imagePart = await imageToBuffer(mediaUrl, mediaType); 
         
-        // --- Use your new, much better prompt! ---
         const result = await model.generateContent([TUTOR_PROMPT, imagePart]);
         const response = await result.response;
         replyText = response.text();
 
       } catch (aiError) {
         console.error("Gemini AI Error:", aiError);
+        console.error(aiError); // Log the full error
         replyText = "Sorry, I had a little trouble analyzing that image. Can you try sending it again?";
       }
     }
