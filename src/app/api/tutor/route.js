@@ -46,7 +46,7 @@ export async function POST(request) {
     const mediaType = formData.get('MediaContentType0'); // The real MIME type
     
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' }); 
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }); 
 
     let replyText = "Please send me a photo of your math homework so I can help!";
 
