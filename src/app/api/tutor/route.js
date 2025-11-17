@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { twiml } from 'twilio';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// --- Import both of our new prompts ---
-import { IMAGE_TUTOR_PROMPT, TEXT_TUTOR_PROMPT } from '../../../lib/prompt.js';
+import { IMAGE_TUTOR_PROMPT, TEXT_TUTOR_PROMPT } from '@/app/lib/prompt';
 
 // --- A "health check" for us to test in the browser ---
 export async function GET(request) {
