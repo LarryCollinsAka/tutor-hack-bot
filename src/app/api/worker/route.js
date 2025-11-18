@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { kv } from '@vercel/kv';
 import { Twilio } from 'twilio'; // We need the full Twilio library
 
-import { TUTOR_SYSTEM_PROMPT } from '@/app/lib/tutor-system';
+import { TUTOR_SYSTEM_PROMPT } from '../../lib/tutor-system';
 
 // --- Initialize clients (outside the handler) ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
